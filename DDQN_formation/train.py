@@ -40,7 +40,7 @@ def load_character(character_path):
 					for b in range(8):
 						if (value & (1 << b)) :
 							loc.append(environment.Loc(x = b + 1, y = n))
-				fds_origin_loc.append([loc, 12, len(content) - 1])
+				fds_origin_loc.append([loc, 9, len(content) - 3])
 
 def main(char):
 	enable_plot = False
