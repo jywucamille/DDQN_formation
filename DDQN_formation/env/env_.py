@@ -10,14 +10,13 @@ class environment(object):
         self._action_space = ['u', 'd', 'l', 'r']
         self.n_actions = len(self._action_space)
         self.n_freedom = len(targets_loc)
-        self.FDs = []
+        self.FDs = []  # 数组中的元素是agent的位置
         self._targets = targets_loc
         self.middle = environment.Loc(x = width / 2 - 1, y = height / 2 - 1)
         self._build_field()
+        # print(self.n_freedom)
 
-        print(self.n_freedom)
-
-    def _build_field(self):
+    def _build_field(self):  
         # create fds
         for n in range(self.n_freedom):
             x = np.random.randint(0, self._width)
@@ -34,10 +33,9 @@ class environment(object):
         for n in range(self.n_freedom):
             x = np.random.randint(0, self._width)
             y = np.random.randint(0, self._height)
-            loc = environment.Loc(x = x, y = y)
+            loc = environment.Loc(x = x, y = y)           
             
             self.FDs.append(loc)
-
 
     def reset_freedom(self, n):
         obsv = np.array([])
@@ -159,6 +157,7 @@ class env_ui(tk.Tk, environment):
     def __init__(self, width, height, targets_loc):
         self._unit = 40
         self._targets_ui = []
+        self._inipos_ui = []
         self._agents_ui = []
         self.Texts = []
         tk.Tk.__init__(self)
@@ -167,7 +166,7 @@ class env_ui(tk.Tk, environment):
         self.geometry('{0}x{1}'.format(self._width * self._unit, self._height * self._unit))
 
     def _build_field(self):
-        super(env_ui, self)._build_field()
+        super(env_ui, self)._build_field() # super函数调用父类environment的_build_field()方法
         self.canvas = tk.Canvas(self, bg = 'white', height = self._height * self._unit, width = self._width * self._unit)
         
         '''
@@ -179,6 +178,12 @@ class env_ui(tk.Tk, environment):
             x0, y0, x1, y1 = 0, r, self._width * self._unit, r
             self.canvas.create_line(x0, y0, x1, y1)
         '''
+
+        # create initial position
+        for loc in self.FDs:
+            x, y = loc.x * self._unit + 20, loc.y * self._unit + 20
+            inipos = self.canvas.create_rectangle(x - 15, y - 15, x  + 15, y + 15, fill = 'blue')
+            self._inipos_ui.append(inipos)
 
         # create targets
         for loc in self._targets:
@@ -202,6 +207,7 @@ class env_ui(tk.Tk, environment):
 
         self.update()
 
+        self.canvas.delete(self._inipos_ui[n])
         self.canvas.delete(self._agents_ui[n])
         self.canvas.delete(self.Texts[n])
         loc = self.FDs[n]
@@ -221,6 +227,7 @@ class env_ui(tk.Tk, environment):
             self.canvas.delete(self._agents_ui[n])
             self.canvas.delete(self.Texts[n])
             self.canvas.delete(self._targets_ui[n])
+            self.canvas.delete(self._inipos_ui[n])
 
         self._agents_ui = []
         self.Texts = []
