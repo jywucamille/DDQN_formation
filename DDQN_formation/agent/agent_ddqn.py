@@ -7,19 +7,18 @@ from keras.optimizers import Adam
 from keras.models import Sequential, Model
 from keras import backend as K
 from keras import regularizers
+import tensorflow as tf
+
 import pickle
 
 BATCH_SIZE = 32
-# EPISODES = 2500000
-EPISODES = 25000
-# EPISODE_LENGTH = 500
-EPISODE_LENGTH = 100
+EPISODES = 2500000
+EPISODE_LENGTH = 500
 
 class DQNAgent:
     def __init__(self, n_state_width, n_state_height, n_actions, epsilon=1.0, train = True):
 
-        # self.memory = deque(maxlen=20000)
-        self.memory = deque(maxlen=1000)
+        self.memory = deque(maxlen=20000)
 
         self.n_actions = n_actions
         self.n_state_width = n_state_width
@@ -34,14 +33,32 @@ class DQNAgent:
         self.epsilon_decay = 0.9999
         self.epsilon_min = 0.03
         self.train = train
-        self.model = self.create_resnet()
-        self.target_model = self.create_resnet()
+        self.set_placeholder()
+        self.outputs, self.model = self.create_resnet()
+        self.target_outputs, self.target_model = self.create_resnet()        
+        self.set_loss()
+        self.set_opti()
+        self.sess = tf.Session()
+        self.sess.run(tf.global_variables_initializer())
+
+
+    
+    def set_loss(self):
+        self.loss = tf.losses.mean_squared_error(self.pred, self.outputs)
+
+    def set_opti(self):
+        self.opti = tf.train.AdamOptimizer(self.learning_rate)
+        self.train_op = self.opti.minimize(self.loss)
+
+    def set_placeholder(self):
+        self.pred = tf.placeholder(tf.float32, shape=(1, self.n_actions))
+        self.inputs_keras = Input(shape=(self.n_state_height, self.n_state_width ,3))
 
     def create_resnet(self):
-        inputs = Input(shape=(self.n_state_height, self.n_state_width, 3))
-
+        
+        # with tf.variable_scope(variable_scope):
         # conv1
-        conv1 = Conv2D(32, (3, 3), padding = 'same', activation='relu')(inputs)
+        conv1 = Conv2D(32, (3, 3), padding = 'same', activation='relu')(self.inputs_keras)
 
         # conv2
         x = Conv2D(32, (3, 3), padding = 'same', activation='relu')(conv1)
@@ -55,21 +72,9 @@ class DQNAgent:
         x = Flatten()(x)
         x = Dense(64, activation='relu')(x)
         x = Dense(self.n_actions, activation='linear')(x)
-
-        model = Model(inputs=inputs, outputs=x)
-        
-        '''
-        for layer in model.layers[:-2]:
-            layer.trainable = False
-        '''
-
-        model.summary()
-        model.compile(loss='mse',
-                      optimizer=Adam(lr=self.learning_rate, decay = 1e-6))
-        
-        model.save('models/formation.h5')
-
-        return model
+        # model = Model(self.inputs_keras, x)
+        model = Model(feed_dict, x)
+        return x, model
 
     def update_target_model(self):
         # copy weights from model to target_model
@@ -83,21 +88,39 @@ class DQNAgent:
 
     def read_model(self):
         return self.model.get_weights()
+        # return self.variables_curr
 
-    def get_action(self, state, train = True):
+    def get_action(self, **kwargs, train = True):
         """
         Perform an action given environment state.
-        :param state: Discrete environment state (integer)
+        # :param state: Discrete environment state (integer)
         :return: Action to be performed (integer)
         """
+        """
+        kwargs: {'obs', 'feature', 'prob'}
+        """
+        feed_dict = {
+            self.obs_input: kwargs['state'][0],
+            self.feat_input: kwargs['state'][1]
+        }
+        
+        # temperature参数没写，不知道含义。。
+
+        # use_mf
+        assert kwargs.get('prob', None) is not None
+        assert len(kwargs['prob']) == len(kwargs['state'][0])
+        feed_dict[self.act_prob_input] = kwargs['prob']
+
         if train:
             if np.random.rand() < self.epsilon:
                 return np.random.randint(0, self.n_actions)
             else:
-                action_values = self.model.predict(state)
+                # action_values = self.sess.run(self.outputs, feed_dict={self.inputs_keras: state})
+                action_values = self.sess.run(self.outputs, feed_dict=feed_dict)
                 best_action = np.argmax(action_values[0])
         else:
-            action_values = self.model.predict(state)
+            # action_values = self.sess.run(self.outputs, feed_dict={self.inputs_keras: state})
+            action_values = self.sess.run(self.outputs, feed_dict=feed_dict)
             best_action = np.argmax(action_values[0])
         #print action_values, best_action
         return best_action
@@ -105,15 +128,17 @@ class DQNAgent:
     def evaluate(self, batch_size):
         batch = random.sample(self.memory, batch_size)
         for state, action, reward, next_state, terminated in batch:
-            final_target = self.model.predict(state)
+            final_target = self.sess.run(self.outputs, feed_dict={self.inputs_keras: state})
+            # final_target = self.model.predict(state)
             if not terminated:
                 # target = immediate reward + (discount factor * value of next state)
-                target = reward + self.gamma * np.amax(self.model.predict(next_state)[0])
+                temp = self.sess.run(self.outputs, feed_dict={self.inputs_keras: next_state})
+                target = reward + self.gamma * np.amax(temp[0])
             else:
                 # if it's a terminal state, the value of this state equals to immediate reward
                 target = reward
             final_target[0][action] = target
-            return self.model.evaluate(state, final_target)
+            return self.sess.run(self.loss, feed_dict={self.inputs_keras: next_state, self.pred: final_target})
 
 
 
@@ -122,18 +147,25 @@ class DQNAgent:
         total_loss = 0
         for state, action, reward, next_state, terminated in batch:
             # Predict value for a current state
-            final_target = self.model.predict(state)
+            # final_target = self.model.predict(state)
+            final_target = self.sess.run(self.outputs, feed_dict={self.inputs_keras: state})
             if not terminated:
-                a = self.model.predict(next_state)[0]
-                t = self.target_model.predict(next_state)[0]
+                temp = self.sess.run(self.outputs, feed_dict={self.inputs_keras: next_state})
+                # print("temp: ", temp.shape)
+                a = temp[0]
+                temp = self.sess.run(self.target_outputs, feed_dict={self.inputs_keras: next_state})
+                t = temp[0]
                 #target = reward + self.gamma * np.amax(self.model.predict(next_state)[0])
                 target = reward + self.gamma * t[np.argmax(a)]
             else:
                 # if it's a terminal state, the value of this state equals to immediate reward
                 target = reward
             final_target[0][action] = target
-            #total_loss += self.model.evaluate(state, final_target)
-            self.model.fit(state, final_target, epochs=1, verbose=0)
+            _, loss = self.sess.run([self.train_op, self.loss], feed_dict={self.inputs_keras: next_state, self.pred: final_target})
+            total_loss += loss
+            # total_loss += self.model.evaluate(state, final_target)
+
+            # self.model.fit(state, final_target, epochs=1, verbose=0)
         # Decrease exploration rate
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
